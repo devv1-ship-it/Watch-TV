@@ -1,272 +1,387 @@
+<!-- THIS FILE IS A CUSTOM RECEIVER FOR GOOGLE CAST DEVICES-->
+<!-- PUBLISHED TO GITHUB - NOT IN LOCAL USAGE-->
 <!DOCTYPE html>
-<html lang="en">
+<html>
 <head>
-    <meta charset="UTF-8">
+    <title>SmartPlayer Custom Receiver</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Cloudflare Worker Stream Test</title>
+    <!-- Load the Cast Receiver Framework (CAF) -->
+    <script src="//www.gstatic.com/cast/sdk/libs/caf_receiver/v3/cast_receiver_framework.js"></script>
     <style>
         body {
-            font-family: Arial, sans-serif;
-            max-width: 900px;
-            margin: 50px auto;
-            padding: 20px;
-            background: #f5f5f5;
+            margin: 0;
+            padding: 0;
+            background-color: #000;
+            overflow: hidden;
+            font-family: sans-serif;
         }
-        .container {
-            background: white;
-            padding: 30px;
-            border-radius: 10px;
-            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+
+        /* The main player element - MUST extend to full screen */
+        cast-media-player {
+            --splash-image: url('https://picsum.photos/1920/1080'); /* Optional splash screen */
+            --progress-color: #FF0000;
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
         }
-        h1 {
-            color: #333;
-            margin-bottom: 10px;
-        }
-        .status {
-            padding: 10px;
-            margin: 10px 0;
-            border-radius: 5px;
+
+        /* Debug Overlay - ALWAYS VISIBLE ON TV for troubleshooting */
+        #debug {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            color: #00FF00; /* Bright Green for visibility */
+            background: rgba(0, 0, 0, 0.85);
+            padding: 15px;
+            font-size: 16px;
             font-weight: bold;
-        }
-        .success {
-            background: #d4edda;
-            color: #155724;
-            border: 1px solid #c3e6cb;
-        }
-        .error {
-            background: #f8d7da;
-            color: #721c24;
-            border: 1px solid #f5c6cb;
-        }
-        .info {
-            background: #d1ecf1;
-            color: #0c5460;
-            border: 1px solid #bee5eb;
-        }
-        video {
-            width: 100%;
-            max-width: 640px;
-            margin: 20px 0;
-            background: #000;
-            border-radius: 5px;
-        }
-        .test-urls {
-            margin: 20px 0;
-        }
-        .test-urls button {
-            display: block;
-            width: 100%;
-            margin: 10px 0;
-            padding: 15px;
-            background: #007bff;
-            color: white;
-            border: none;
-            border-radius: 5px;
-            cursor: pointer;
-            text-align: left;
-            font-size: 14px;
-        }
-        .test-urls button:hover {
-            background: #0056b3;
-        }
-        .test-urls button:disabled {
-            background: #ccc;
-            cursor: not-allowed;
-        }
-        .log {
-            background: #f8f9fa;
-            padding: 15px;
-            border-radius: 5px;
-            margin: 20px 0;
-            max-height: 300px;
+            width: 90%;
+            max-height: 500px;
             overflow-y: auto;
-            font-family: 'Courier New', monospace;
-            font-size: 12px;
+            z-index: 9999;
+            display: block; /* ALWAYS VISIBLE */
+            border: 2px solid #00FF00;
+            border-radius: 5px;
         }
-        .log div {
-            margin: 5px 0;
+        
+        #debug .error {
+            color: #FF0000;
+            font-size: 18px;
         }
-        .log .error-log {
-            color: #dc3545;
+        
+        #debug .warning {
+            color: #FFA500;
         }
-        .log .success-log {
-            color: #28a745;
+        
+        #debug .success {
+            color: #00FF00;
         }
-        .log .info-log {
-            color: #17a2b8;
+        
+        #debug .info {
+            color: #00BFFF;
         }
     </style>
 </head>
 <body>
-    <div class="container">
-        <h1>🎬 Cloudflare Worker Stream Test</h1>
-        <p>This page tests if your Cloudflare Worker can stream video to browsers.</p>
-        
-        <div id="status" class="status info">
-            Status: Waiting for test...
-        </div>
 
-        <div class="test-urls">
-            <h3>Test URLs:</h3>
-            <button onclick="testUrl('https://shy-wildflower-d172.minh-laitan213.workers.dev/stream?url=https%3A%2F%2Ffast-tailor.3catdirectes.cat%2Fv1%2Fchannel%2Fccma-channel2%2Fhls.m3u8')">
-                Test 3Cat CCMA Channel 2
-            </button>
-            <button onclick="testUrl('https://shy-wildflower-d172.minh-laitan213.workers.dev/stream?url=https%3A%2F%2Ffast-tailor.3catdirectes.cat%2Fv1%2Fchannel%2Fbunquer%2Fhls.m3u8')">
-                Test 3Cat Bunquer
-            </button>
-            <button onclick="testUrl('https://shy-wildflower-d172.minh-laitan213.workers.dev/stream?url=https%3A%2F%2F3awlive.akamaized.net%2Fhls%2Flive%2F2032295%2F3AW%2Findex.m3u8')">
-                Test 3AW Akamai
-            </button>
-        </div>
+<!-- The built-in CAF player UI -->
+<cast-media-player id="player"></cast-media-player>
 
-        <video id="video" controls></video>
+<!-- Debug logging container -->
+<div id="debug"></div>
 
-        <div class="log" id="log">
-            <div class="info-log">🔍 Log messages will appear here...</div>
-        </div>
-    </div>
+<script>
+    // --- LOGGER UTILITY ---
+    // Always enabled for debugging 3Cat/Akamai issues
+    const DEBUG_MODE = true;
 
-    <!-- HLS.js library for browsers that don't support HLS natively -->
-    <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
+    function log(msg, type = 'info') {
+        console.log(msg);
+        if (DEBUG_MODE) {
+            const debugEl = document.getElementById('debug');
+            debugEl.style.display = 'block';
+            const line = document.createElement('div');
+            line.className = type;
+            line.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
+            debugEl.insertBefore(line, debugEl.firstChild);
+            
+            // Keep only last 20 lines to prevent overflow
+            while (debugEl.children.length > 20) {
+                debugEl.removeChild(debugEl.lastChild);
+            }
+        }
+    }
     
-    <script>
-        const video = document.getElementById('video');
-        const statusDiv = document.getElementById('status');
-        const logDiv = document.getElementById('log');
-        let hls = null;
+    function logError(msg) {
+        log("❌ " + msg, 'error');
+    }
+    
+    function logWarning(msg) {
+        log("⚠️ " + msg, 'warning');
+    }
+    
+    function logSuccess(msg) {
+        log("✅ " + msg, 'success');
+    }
+    
+    function logInfo(msg) {
+        log("ℹ️ " + msg, 'info');
+    }
 
-        function log(message, type = 'info') {
-            const timestamp = new Date().toLocaleTimeString();
-            const logEntry = document.createElement('div');
-            logEntry.className = `${type}-log`;
-            logEntry.textContent = `[${timestamp}] ${message}`;
-            logDiv.appendChild(logEntry);
-            logDiv.scrollTop = logDiv.scrollHeight;
-            console.log(message);
-        }
+    // --- RECEIVER INITIALIZATION ---
+    const context = cast.framework.CastReceiverContext.getInstance();
+    const playerManager = context.getPlayerManager();
 
-        function setStatus(message, type = 'info') {
-            statusDiv.textContent = message;
-            statusDiv.className = `status ${type}`;
-        }
+    // 1. CONFIG: Optimize for HLS (M3U8)
+    const playbackConfig = new cast.framework.PlaybackConfig();
+    playbackConfig.autoResumeDuration = 5;
 
-        function testUrl(url) {
-            log('🎬 Testing URL: ' + url, 'info');
-            setStatus('Testing stream...', 'info');
+    // Anti-CORS trick: do not send credentials/cookies with segment requests
+    playbackConfig.segmentRequestCredentials = false;
+    playbackConfig.manifestRequestCredentials = false;
 
-            // Clear previous instance
-            if (hls) {
-                hls.destroy();
-                hls = null;
-            }
+    // 2. INTERCEPTOR: The most powerful part of Custom Receiver
+    // This runs before the video tries to load.
+    playerManager.setMessageInterceptor(
+        cast.framework.messages.MessageType.LOAD,
+        request => {
+            logInfo("🎬 LOAD REQUEST RECEIVED");
 
-            // Check if HLS.js is supported
-            if (Hls.isSupported()) {
-                log('✅ Browser supports HLS.js', 'success');
+            if (request.media && request.media.contentId) {
+                const url = request.media.contentId;
+                logInfo("Original URL: " + url);
+
+                // VALIDATION #1: Check if URL is valid
+                if (!url || url.trim() === '') {
+                    logError("Empty URL received!");
+                    return null; // Reject the request
+                }
                 
-                hls = new Hls({
-                    debug: false,
-                    enableWorker: true,
-                    lowLatencyMode: false,
-                });
-
-                // Load the stream
-                hls.loadSource(url);
-                hls.attachMedia(video);
-
-                // Event: Manifest parsed successfully
-                hls.on(Hls.Events.MANIFEST_PARSED, function(event, data) {
-                    log('✅ Manifest loaded successfully!', 'success');
-                    log(`✅ Found ${data.levels.length} quality level(s)`, 'success');
-                    setStatus('✅ Stream loaded successfully! Press play to watch.', 'success');
+                // ANALYSIS: Check domain
+                try {
+                    const urlObj = new URL(url);
+                    logInfo("Domain: " + urlObj.hostname);
+                    logInfo("Path: " + urlObj.pathname);
                     
-                    // Auto-play
-                    video.play().catch(e => {
-                        log('⚠️ Auto-play blocked by browser. Click play button.', 'info');
-                    });
-                });
-
-                // Event: Level loaded (quality variant)
-                hls.on(Hls.Events.LEVEL_LOADED, function(event, data) {
-                    log(`📊 Quality level loaded: ${data.details.totalduration.toFixed(2)}s`, 'info');
-                });
-
-                // Event: Fragment loaded (video segment)
-                hls.on(Hls.Events.FRAG_LOADED, function(event, data) {
-                    log(`📦 Segment loaded: ${data.frag.sn} (${(data.frag.duration).toFixed(2)}s)`, 'success');
-                });
-
-                // Event: Error
-                hls.on(Hls.Events.ERROR, function(event, data) {
-                    if (data.fatal) {
-                        log(`❌ FATAL ERROR: ${data.type} - ${data.details}`, 'error');
-                        setStatus(`❌ Fatal Error: ${data.details}`, 'error');
-                        
-                        switch(data.type) {
-                            case Hls.ErrorTypes.NETWORK_ERROR:
-                                log('❌ Network error - CORS or connectivity issue', 'error');
-                                log('💡 Check if Cloudflare Worker is deployed correctly', 'info');
-                                break;
-                            case Hls.ErrorTypes.MEDIA_ERROR:
-                                log('❌ Media error - trying to recover...', 'error');
-                                hls.recoverMediaError();
-                                break;
-                            default:
-                                log('❌ Unrecoverable error', 'error');
-                                hls.destroy();
-                                break;
-                        }
-                    } else {
-                        log(`⚠️ Non-fatal error: ${data.details}`, 'info');
+                    // Special handling for known problematic domains
+                    if (urlObj.hostname.includes('3catdirectes.cat')) {
+                        logWarning("3Cat stream detected - may have relative URL issues");
                     }
-                });
+                    if (urlObj.hostname.includes('akamaized.net')) {
+                        logWarning("Akamai CDN detected - may have relative URL issues");
+                    }
+                    if (urlObj.searchParams.has('url')) {
+                        logInfo("Proxied URL detected (Cloudflare Worker)");
+                        const proxiedUrl = decodeURIComponent(urlObj.searchParams.get('url'));
+                        logInfo("Actual stream: " + proxiedUrl);
+                    }
+                } catch (e) {
+                    logError("Invalid URL format: " + e.message);
+                }
 
-            } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
-                // Native HLS support (Safari)
-                log('✅ Browser has native HLS support', 'success');
-                video.src = url;
-                
-                video.addEventListener('loadedmetadata', function() {
-                    log('✅ Stream metadata loaded', 'success');
-                    setStatus('✅ Stream loaded! Press play.', 'success');
-                });
+                // VALIDATION #2: Check protocol
+                if (url.startsWith('http://')) {
+                    logWarning("HTTP detected - upgrading to HTTPS");
+                    request.media.contentId = url.replace('http://', 'https://');
+                    logSuccess("Upgraded to HTTPS");
+                } else if (!url.startsWith('https://')) {
+                    logError("Invalid protocol. Only HTTP/HTTPS supported.");
+                    logError("Received: " + url);
+                    return null; // Reject the request
+                }
 
-                video.addEventListener('error', function(e) {
-                    log('❌ Video error: ' + e.message, 'error');
-                    setStatus('❌ Error loading stream', 'error');
-                });
+                // VALIDATION #3: Check if it looks like M3U8
+                if (!url.includes('.m3u8') && !url.includes('workers.dev') && !url.includes('mpegurl')) {
+                    logWarning("URL doesn't appear to be M3U8 format");
+                    logWarning("This might fail: " + url);
+                }
 
+                // Force content type if missing
+                if (!request.media.contentType) {
+                    request.media.contentType = 'application/x-mpegurl';
+                    logInfo("Set content type to: application/x-mpegurl");
+                } else {
+                    logInfo("Content type: " + request.media.contentType);
+                }
+
+                // Log final URL that will be used
+                logSuccess("Final URL: " + request.media.contentId);
+                logSuccess("Ready to load stream");
             } else {
-                log('❌ Browser does not support HLS playback', 'error');
-                setStatus('❌ Browser not supported', 'error');
+                logError("No media or contentId in request");
+                return null;
+            }
+            return request;
+        }
+    );
+
+    // 3. ERROR LISTENER with detailed categorization and troubleshooting
+    playerManager.addEventListener(
+        cast.framework.events.EventType.ERROR,
+        event => {
+            logError("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+            logError("ERROR OCCURRED!");
+            logError("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+            
+            if (event.error) {
+                logError("Error Type: " + event.error);
+            }
+
+            // Detailed error breakdown
+            if (event.detailedErrorCode) {
+                logError("Detailed Code: " + event.detailedErrorCode);
+
+                // Map error codes to user-friendly explanations
+                const errorDetails = {
+                    'LOAD_FAILED': {
+                        msg: 'Failed to load the stream',
+                        hints: [
+                            'Check if URL is accessible',
+                            'Verify CORS headers are present',
+                            'Try using Cloudflare Worker proxy'
+                        ]
+                    },
+                    'NETWORK_ERROR': {
+                        msg: 'Network connection failed',
+                        hints: [
+                            'Server may be blocking Chromecast',
+                            'Could be geo-restricted content',
+                            'Check if using HTTP instead of HTTPS'
+                        ]
+                    },
+                    'MANIFEST_ERROR': {
+                        msg: 'M3U8 playlist is malformed or inaccessible',
+                        hints: [
+                            'Playlist may contain relative URLs',
+                            'Missing #EXTM3U header',
+                            'Use Cloudflare Worker to fix format'
+                        ]
+                    },
+                    'SEGMENT_ERROR': {
+                        msg: 'Failed to download video segments',
+                        hints: [
+                            'Segments may have relative URLs',
+                            'CORS blocking segment downloads',
+                            'Segments may be on different domain'
+                        ]
+                    },
+                    'GENERIC': {
+                        msg: 'Unknown playback error',
+                        hints: [
+                            'Stream format may not be supported',
+                            'Could be DRM-protected content'
+                        ]
+                    }
+                };
+
+                const errorType = event.detailedErrorCode.toString();
+                const details = errorDetails[errorType] || errorDetails['GENERIC'];
+                
+                logError("💬 " + details.msg);
+                logInfo("🔧 Troubleshooting hints:");
+                details.hints.forEach(hint => logInfo("  • " + hint));
+            }
+
+            // Log the stream URL that failed
+            const currentMedia = playerManager.getMediaInformation();
+            if (currentMedia && currentMedia.contentId) {
+                logError("Failed URL: " + currentMedia.contentId);
+                
+                const url = currentMedia.contentId;
+
+                // Specific diagnostics for the URL
+                if (url.startsWith('http://')) {
+                    logWarning("💡 HTTP stream detected!");
+                    logWarning("💡 Solution: Use HTTPS or route through proxy");
+                }
+                
+                if (url.includes('3catdirectes.cat')) {
+                    logWarning("💡 3Cat stream detected!");
+                    logWarning("💡 These often have relative URL issues");
+                    logWarning("💡 Should be using proxy: workers.dev");
+                    if (!url.includes('workers.dev')) {
+                        logError("❌ NOT USING PROXY! This will fail!");
+                        logError("❌ Add to PROXY_REQUIRED_DOMAINS in app");
+                    }
+                }
+                
+                if (url.includes('akamaized.net')) {
+                    logWarning("💡 Akamai CDN detected!");
+                    logWarning("💡 May have relative URL issues");
+                    if (!url.includes('workers.dev')) {
+                        logWarning("💡 Consider using proxy for this stream");
+                    }
+                }
+                
+                if (!url.includes('.m3u8')) {
+                    logWarning("💡 URL doesn't contain .m3u8");
+                    logWarning("💡 May not be HLS format");
+                }
+                
+                // Check if proxied
+                if (url.includes('workers.dev')) {
+                    logInfo("✅ Using Cloudflare Worker proxy");
+                    try {
+                        const urlObj = new URL(url);
+                        const actualUrl = decodeURIComponent(urlObj.searchParams.get('url') || '');
+                        if (actualUrl) {
+                            logInfo("Original: " + actualUrl);
+                            logWarning("⚠️ Proxy is active but still failing");
+                            logWarning("⚠️ Check if worker.js is correctly deployed");
+                        }
+                    } catch (e) {
+                        logError("Failed to parse proxy URL");
+                    }
+                }
+            }
+
+            // Log full error object for debugging
+            try {
+                logInfo("Full error data:");
+                logInfo(JSON.stringify(event, null, 2));
+            } catch (e) {
+                logWarning("Could not stringify error object");
+            }
+            
+            logError("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+        }
+    );
+
+    // 4. PLAYER STATE LISTENER - Track playback progress
+    playerManager.addEventListener(
+        cast.framework.events.EventType.PLAYER_STATE_CHANGED,
+        event => {
+            const state = event.playerState;
+            
+            switch(state) {
+                case 'IDLE':
+                    logInfo("⏹️ State: IDLE (no media loaded)");
+                    break;
+                case 'BUFFERING':
+                    logInfo("⏳ State: BUFFERING (loading stream)");
+                    break;
+                case 'PLAYING':
+                    logSuccess("▶️ State: PLAYING (stream active!)");
+                    break;
+                case 'PAUSED':
+                    logInfo("⏸️ State: PAUSED");
+                    break;
+                default:
+                    logInfo("State: " + state);
             }
         }
-
-        // Video element events
-        video.addEventListener('playing', function() {
-            log('▶️ Video is playing', 'success');
-            setStatus('▶️ Playing...', 'success');
-        });
-
-        video.addEventListener('pause', function() {
-            log('⏸️ Video paused', 'info');
-        });
-
-        video.addEventListener('waiting', function() {
-            log('⏳ Buffering...', 'info');
-        });
-
-        video.addEventListener('error', function(e) {
-            const error = video.error;
-            if (error) {
-                log(`❌ Video error code ${error.code}: ${error.message}`, 'error');
+    );
+    
+    // 5. MEDIA STATUS LISTENER - Track media events
+    playerManager.addEventListener(
+        cast.framework.events.EventType.MEDIA_STATUS,
+        event => {
+            const mediaStatus = event.mediaStatus;
+            if (mediaStatus) {
+                const currentTime = mediaStatus.currentTime || 0;
+                const duration = mediaStatus.media?.duration || 0;
+                
+                if (duration > 0) {
+                    logInfo(`⏱️ Time: ${currentTime.toFixed(0)}s / ${duration.toFixed(0)}s`);
+                }
             }
-        });
+        }
+    );
 
-        // Initial message
-        log('🚀 Ready to test streams', 'success');
-        log('💡 Click one of the test buttons above', 'info');
-    </script>
+    logSuccess("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+    logSuccess("Custom Receiver Initialized!");
+    logSuccess("Waiting for stream...");
+    logSuccess("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+
+    // Start the receiver
+    context.start({
+        playbackConfig: playbackConfig,
+        // Keep receiver alive for 5 minutes if idle
+        maxInactivity: 300
+    });
+
+</script>
 </body>
 </html>
-
