@@ -1,3 +1,5 @@
+<!-- THIS FILE IS A CUSTOM RECEIVER FOR GOOGLE CAST DEVICES-->
+<!-- PUBLISHED TO GITHUB - NOT IN LOCAL USAGE-->
 <!DOCTYPE html>
 <html>
 <head>
@@ -13,7 +15,7 @@
             overflow: hidden;
             font-family: sans-serif;
         }
-        
+
         /* The main player element - MUST extend to full screen */
         cast-media-player {
             --splash-image: url('https://picsum.photos/1920/1080'); /* Optional splash screen */
@@ -44,95 +46,151 @@
 </head>
 <body>
 
-    <!-- The built-in CAF player UI -->
-    <cast-media-player id="player"></cast-media-player>
-    
-    <!-- Debug logging container -->
-    <div id="debug"></div>
+<!-- The built-in CAF player UI -->
+<cast-media-player id="player"></cast-media-player>
 
-    <script>
-        // --- LOGGER UTILITY ---
-        // Change this to true to see logs on your TV screen
-        const DEBUG_MODE = true; 
+<!-- Debug logging container -->
+<div id="debug"></div>
 
-        function log(msg) {
-            console.log(msg);
-            if (DEBUG_MODE) {
-                const debugEl = document.getElementById('debug');
-                debugEl.style.display = 'block';
-                const line = document.createElement('div');
-                line.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
-                debugEl.insertBefore(line, debugEl.firstChild);
-            }
+<script>
+    // --- LOGGER UTILITY ---
+    // Change this to true to see logs on your TV screen
+    const DEBUG_MODE = true;
+
+    function log(msg) {
+        console.log(msg);
+        if (DEBUG_MODE) {
+            const debugEl = document.getElementById('debug');
+            debugEl.style.display = 'block';
+            const line = document.createElement('div');
+            line.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
+            debugEl.insertBefore(line, debugEl.firstChild);
         }
+    }
 
-        // --- RECEIVER INITIALIZATION ---
-        const context = cast.framework.CastReceiverContext.getInstance();
-        const playerManager = context.getPlayerManager();
+    // --- RECEIVER INITIALIZATION ---
+    const context = cast.framework.CastReceiverContext.getInstance();
+    const playerManager = context.getPlayerManager();
 
-        // 1. CONFIG: Optimize for HLS (M3U8)
-        const playbackConfig = new cast.framework.PlaybackConfig();
-        playbackConfig.autoResumeDuration = 5;
-        
-        // Anti-CORS trick: do not send credentials/cookies with segment requests
-        playbackConfig.segmentRequestCredentials = false;
-        playbackConfig.manifestRequestCredentials = false;
+    // 1. CONFIG: Optimize for HLS (M3U8)
+    const playbackConfig = new cast.framework.PlaybackConfig();
+    playbackConfig.autoResumeDuration = 5;
 
-        // 2. INTERCEPTOR: The most powerful part of Custom Receiver
-        // This runs before the video tries to load.
-        playerManager.setMessageInterceptor(
-            cast.framework.messages.MessageType.LOAD,
-            request => {
-                log("LOAD request received!");
-                
-                if (request.media && request.media.contentId) {
-                    const url = request.media.contentId;
-                    log("Stream URL: " + url);
+    // Anti-CORS trick: do not send credentials/cookies with segment requests
+    playbackConfig.segmentRequestCredentials = false;
+    playbackConfig.manifestRequestCredentials = false;
 
-                    // Force content type if missing
-                    if (!request.media.contentType) {
-                        request.media.contentType = 'application/x-mpegurl';
-                    }
-                    
-                    // Fix mixed content if possible (similar to your Android code)
-                    if (url.startsWith('http://')) {
-                         log("Upgrading HTTP to HTTPS...");
-                         request.media.contentId = url.replace('http://', 'https://');
-                    }
+    // 2. INTERCEPTOR: The most powerful part of Custom Receiver
+    // This runs before the video tries to load.
+    playerManager.setMessageInterceptor(
+        cast.framework.messages.MessageType.LOAD,
+        request => {
+            log("LOAD request received!");
+
+            if (request.media && request.media.contentId) {
+                const url = request.media.contentId;
+                log("Stream URL: " + url);
+
+                // VALIDATION #1: Check if URL is valid
+                if (!url || url.trim() === '') {
+                    log("ERROR: Empty URL received!");
+                    return null; // Reject the request
                 }
-                return request;
-            }
-        );
 
-        // 3. ERROR LISTENER
-        playerManager.addEventListener(
-            cast.framework.events.EventType.ERROR,
-            event => {
-                log("ERROR: " + JSON.stringify(event));
-                // specifically check for CORS or Network errors
-                if (event.detailedErrorCode) {
-                    log("Detailed Error Code: " + event.detailedErrorCode);
+                // VALIDATION #2: Check protocol
+                if (url.startsWith('http://')) {
+                    log("⚠️ WARNING: HTTP detected - upgrading to HTTPS");
+                    request.media.contentId = url.replace('http://', 'https://');
+                } else if (!url.startsWith('https://')) {
+                    log("❌ ERROR: Invalid protocol. Only HTTP/HTTPS supported.");
+                    log("❌ Received URL: " + url);
+                    return null; // Reject the request
+                }
+
+                // VALIDATION #3: Check if it looks like M3U8
+                if (!url.includes('.m3u8') && !url.includes('workers.dev') && !url.includes('mpegurl')) {
+                    log("⚠️ WARNING: URL doesn't appear to be M3U8 format");
+                    log("⚠️ This might fail. URL: " + url);
+                }
+
+                // Force content type if missing
+                if (!request.media.contentType) {
+                    request.media.contentType = 'application/x-mpegurl';
+                    log("Set content type to: application/x-mpegurl");
+                }
+
+                // Log final URL that will be used
+                log("✅ Final URL: " + request.media.contentId);
+                log("✅ Content Type: " + request.media.contentType);
+            } else {
+                log("❌ ERROR: No media or contentId in request");
+                return null;
+            }
+            return request;
+        }
+    );
+
+    // 3. ERROR LISTENER with detailed categorization
+    playerManager.addEventListener(
+        cast.framework.events.EventType.ERROR,
+        event => {
+            log("❌❌❌ ERROR OCCURRED ❌❌❌");
+            log("Error Code: " + event.error);
+
+            // Detailed error breakdown
+            if (event.detailedErrorCode) {
+                log("Detailed Error Code: " + event.detailedErrorCode);
+
+                // Common error codes and their meanings
+                const errorMeanings = {
+                    'MEDIA_ERROR_MESSAGE': 'The media could not be loaded',
+                    'NETWORK_ERROR': 'Network connection failed',
+                    'MANIFEST_ERROR': 'M3U8 playlist is malformed or inaccessible',
+                    'SEGMENT_ERROR': 'Failed to download video segments',
+                    'CORS_ERROR': 'Cross-Origin Resource Sharing blocked',
+                };
+
+                const errorType = event.detailedErrorCode.toString();
+                if (errorMeanings[errorType]) {
+                    log("Meaning: " + errorMeanings[errorType]);
                 }
             }
-        );
-        
-        // 4. PLAYER STATE LISTENER
-        playerManager.addEventListener(
-            cast.framework.events.EventType.PLAYER_STATE_CHANGED,
-            event => {
-                log("State: " + event.playerState);
+
+            // Log the stream URL that failed
+            const currentMedia = playerManager.getMediaInformation();
+            if (currentMedia && currentMedia.contentId) {
+                log("Failed URL: " + currentMedia.contentId);
+
+                // Provide diagnostic hints
+                if (currentMedia.contentId.startsWith('http://')) {
+                    log("💡 HINT: HTTP streams often fail. Use HTTPS or proxy.");
+                }
+                if (!currentMedia.contentId.includes('.m3u8')) {
+                    log("💡 HINT: URL doesn't contain .m3u8 - might not be HLS stream.");
+                }
             }
-        );
 
-        log("Starting Receiver Manager...");
-        
-        // Start the receiver
-        context.start({
-            playbackConfig: playbackConfig,
-            // Keep receiver alive for 5 minutes if idle
-            maxInactivity: 300 
-        });
+            log("Full Error Object: " + JSON.stringify(event));
+        }
+    );
 
-    </script>
+    // 4. PLAYER STATE LISTENER
+    playerManager.addEventListener(
+        cast.framework.events.EventType.PLAYER_STATE_CHANGED,
+        event => {
+            log("State: " + event.playerState);
+        }
+    );
+
+    log("Starting Receiver Manager...");
+
+    // Start the receiver
+    context.start({
+        playbackConfig: playbackConfig,
+        // Keep receiver alive for 5 minutes if idle
+        maxInactivity: 300
+    });
+
+</script>
 </body>
 </html>
