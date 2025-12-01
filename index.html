@@ -5,6 +5,12 @@
 <head>
     <title>SmartPlayer Custom Receiver</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    
+    <!-- Prevent Caching - Force Chromecast to Always Load Latest Version -->
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+    <meta http-equiv="Pragma" content="no-cache">
+    <meta http-equiv="Expires" content="0">
+    
     <!-- Load the Cast Receiver Framework (CAF) -->
     <script src="//www.gstatic.com/cast/sdk/libs/caf_receiver/v3/cast_receiver_framework.js"></script>
     <style>
@@ -45,20 +51,20 @@
             border: 2px solid #00FF00;
             border-radius: 5px;
         }
-        
+
         #debug .error {
             color: #FF0000;
             font-size: 18px;
         }
-        
+
         #debug .warning {
             color: #FFA500;
         }
-        
+
         #debug .success {
             color: #00FF00;
         }
-        
+
         #debug .info {
             color: #00BFFF;
         }
@@ -86,26 +92,26 @@
             line.className = type;
             line.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
             debugEl.insertBefore(line, debugEl.firstChild);
-            
+
             // Keep only last 20 lines to prevent overflow
             while (debugEl.children.length > 20) {
                 debugEl.removeChild(debugEl.lastChild);
             }
         }
     }
-    
+
     function logError(msg) {
         log("❌ " + msg, 'error');
     }
-    
+
     function logWarning(msg) {
         log("⚠️ " + msg, 'warning');
     }
-    
+
     function logSuccess(msg) {
         log("✅ " + msg, 'success');
     }
-    
+
     function logInfo(msg) {
         log("ℹ️ " + msg, 'info');
     }
@@ -138,13 +144,13 @@
                     logError("Empty URL received!");
                     return null; // Reject the request
                 }
-                
+
                 // ANALYSIS: Check domain
                 try {
                     const urlObj = new URL(url);
                     logInfo("Domain: " + urlObj.hostname);
                     logInfo("Path: " + urlObj.pathname);
-                    
+
                     // Special handling for known problematic domains
                     if (urlObj.hostname.includes('3catdirectes.cat')) {
                         logWarning("3Cat stream detected - may have relative URL issues");
@@ -204,7 +210,7 @@
             logError("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
             logError("ERROR OCCURRED!");
             logError("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
-            
+
             if (event.error) {
                 logError("Error Type: " + event.error);
             }
@@ -258,7 +264,7 @@
 
                 const errorType = event.detailedErrorCode.toString();
                 const details = errorDetails[errorType] || errorDetails['GENERIC'];
-                
+
                 logError("💬 " + details.msg);
                 logInfo("🔧 Troubleshooting hints:");
                 details.hints.forEach(hint => logInfo("  • " + hint));
@@ -268,7 +274,7 @@
             const currentMedia = playerManager.getMediaInformation();
             if (currentMedia && currentMedia.contentId) {
                 logError("Failed URL: " + currentMedia.contentId);
-                
+
                 const url = currentMedia.contentId;
 
                 // Specific diagnostics for the URL
@@ -276,7 +282,7 @@
                     logWarning("💡 HTTP stream detected!");
                     logWarning("💡 Solution: Use HTTPS or route through proxy");
                 }
-                
+
                 if (url.includes('3catdirectes.cat')) {
                     logWarning("💡 3Cat stream detected!");
                     logWarning("💡 These often have relative URL issues");
@@ -286,7 +292,7 @@
                         logError("❌ Add to PROXY_REQUIRED_DOMAINS in app");
                     }
                 }
-                
+
                 if (url.includes('akamaized.net')) {
                     logWarning("💡 Akamai CDN detected!");
                     logWarning("💡 May have relative URL issues");
@@ -294,12 +300,12 @@
                         logWarning("💡 Consider using proxy for this stream");
                     }
                 }
-                
+
                 if (!url.includes('.m3u8')) {
                     logWarning("💡 URL doesn't contain .m3u8");
                     logWarning("💡 May not be HLS format");
                 }
-                
+
                 // Check if proxied
                 if (url.includes('workers.dev')) {
                     logInfo("✅ Using Cloudflare Worker proxy");
@@ -324,7 +330,7 @@
             } catch (e) {
                 logWarning("Could not stringify error object");
             }
-            
+
             logError("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
         }
     );
@@ -334,7 +340,7 @@
         cast.framework.events.EventType.PLAYER_STATE_CHANGED,
         event => {
             const state = event.playerState;
-            
+
             switch(state) {
                 case 'IDLE':
                     logInfo("⏹️ State: IDLE (no media loaded)");
@@ -353,7 +359,7 @@
             }
         }
     );
-    
+
     // 5. MEDIA STATUS LISTENER - Track media events
     playerManager.addEventListener(
         cast.framework.events.EventType.MEDIA_STATUS,
@@ -362,7 +368,7 @@
             if (mediaStatus) {
                 const currentTime = mediaStatus.currentTime || 0;
                 const duration = mediaStatus.media?.duration || 0;
-                
+
                 if (duration > 0) {
                     logInfo(`⏱️ Time: ${currentTime.toFixed(0)}s / ${duration.toFixed(0)}s`);
                 }
